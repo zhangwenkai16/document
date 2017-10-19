@@ -1,0 +1,263 @@
+RIPng研究
+
+RIP系列路由协议，基于距离矢量算法，使用路由器相互协商、通告来实现路由发现，利用跳数来计数。
+RIPv1、RIPv2适用于IPv4，RIPng使用于IPv6. 下面，主要简单介绍各协议的报文格式、工作情况等。
+
+-------------------------------------------RIPv1 RFC2453--------------------------------------------
+****Packet Format
+   The RIP packet format is:
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |  command (1)  |  version (1)  |       must be zero (2)        |
+      +---------------+---------------+-------------------------------+
+      |                                                               |
+      ~                         RIP Entry (20)                        ~
+      |                                                               |
+      +---------------+---------------+---------------+---------------+
+      
+      COMMAND 区域：1 request, 2 response
+    There may be between 1 and 25 (inclusive) RIP entries.  A RIP-1 entry
+   has the following format:
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      | address family identifier (2) |      must be zero (2)         |
+      +-------------------------------+-------------------------------+
+      |                        IPv4 address (4)                       |
+      +---------------------------------------------------------------+
+      |                        must be zero (4)                       |
+      +---------------------------------------------------------------+
+      |                        must be zero (4)                       |
+      +---------------------------------------------------------------+
+      |                           metric (4)                          |
+      +---------------------------------------------------------------+
+      
+      metric表示距离，1~15,16表示无限
+      
+****keep message：需要维护的状态信息
+ 
+  - address: in IP implementations of these algorithms, this will be
+     the IP address of the host or network.
+
+   - router: the first router along the route to the destination.
+
+   - interface: the physical network which must be used to reach the
+     first router.
+
+   - metric: a number, indicating the distance to the destination.
+
+   - timer: the amount of time since the entry was last updated.
+   
+   - flag: 表示最近是否有改变
+
+****距离矢量算法
+
+      D(i,i) = 0,                      all i
+      D(i,j) = min [d(i,k) + D(k,j)],  otherwise
+    D(i,j)表示i到j的最短距离，d(i,j)表示i到j的直接距离
+      d(i,j) = n                       i,j是邻居，n为cost
+      d(i,j) = infinity                otherwise
+    因此如果i能获取所有它的邻居k到j的cost，加上d(i,k)，即可选出最短的路径
+    
+    基本算法流程：
+    （1）每个节点维护一个到所有节点的最短距离矩阵；
+    （2）周期性地发送该矩阵信息给邻居；
+    （3）收到矩阵信息后，计算通过sender发送的到目的地的距离，与当前最短距离矩阵比较，
+        更新最短距离矩阵；
+    考虑到拓扑变化：router crash时不会发出任何消息，引入老化机制
+    
+    上述算法只能证明会在有限时间收敛，而具体时间有多长，在实际应用中，这个时间一定得尽量短
+        通过讨论（可以查看rfc文档中的例子），当一条快捷通道crash后，因为时延，需要一段时间才能重建正确的
+    路由表。而最坏情况下，有的路径会完全断开（metric到达infinity），所以需要选择一个合适的
+    infinity，保证：
+    （1）大到网络内所有有效路径的metric比其小；
+    （2）小到发生上述情况时能尽快收敛；
+    最终选择infinity为16，所以这也是RIP协议使用小型网络的原因？
+ 
+    split horizon
+        另外，一些问题是由于直接相连的A/B节点均宣告可以通过彼此来get to target，所以会引起循环，
+    解决方法是：
+        poisoned reverse split horizon，即如果A确定能通过B到达target，那么A发给B的信息中，
+            A到target的距离为infinity；
+        在广播中，该信息则需要广播，使同一网络中的其他节点均直接通过B get to target。
+                                    
+    该方法的缺陷是：因为需要发送额外信息，增加信息开销，only local works VS all learned
+    
+        因此，router协议规定实现必须使用poisoned reverse split horizon，可以提供开关。
+    Triggered updates
+        上述无法消除3个节点的循环，提出的解决办法是：如果路由发生改变，需要立即发出updates消息，
+        receiver如果是通过sender get to target，无论metric变大变小，都需要更新metric
+                                                
+    The router requirements RFC [11] specifies that all implementation of   
+    RIP must implement triggered update for deleted routes and may   
+    implement triggered updates for new routes or change of routes.  RIP
+    implementations must also limit the rate which of triggered updates   
+    may be trandmitted
+    
+ ****Timer
+    周期性发送timer 30s，实现时通常会加上一个random数，防止同时发送冲突
+      每条路由信息需要2个timer: 老化timer（180s），和删除timer(120s)，因为老化后，需要时间将该信息扩
+    展到整个网络。
+        - The garbage-collection timer is set for 120 seconds.
+        - The metric for the route is set to 16 (infinity).  This causes the     route to be removed from service.
+        - The route change flag is set to indicate that this entry has been     changed.
+        - The output process is signalled to trigger a response.
+        
+ ****INPUT：接收到request/response的处理
+        接收到request需要区分：for specific networks（用于查询） or all networks（用于实际路由）, & 
+    to specific router or broadcast
+        3种情况下接收到response，处理都是一样的：
+           - response to a specific query 
+           - regular update (unsolicited response)  
+           - triggered update caused by a route chang
+        首先，需要做一些有效性检查：RIP port, src ip（直连但是不是自己发的）
+        然后，根据收到的信息做处理，该更新的更新，该删除的删除
+    注意：如果metric相同，而next hop发生变化，一般做法是替换，但是会引发一系列更新消息。
+        所以实际中，需要查看old条目的老化时间，如果已经过了一半，那么替换。
+    
+ ****OUTPUT：需要发送response的处理
+    3种情况：
+    (1)收到request；
+    (2)发送周期性response；
+    (3)triggered updates；
+    triggered updates：（1）不能太频繁发送，所以需要timer，（2）只需要发送必须发送的信息，没必要发送
+                        所有信息，这些信息中必须包含split horizon机制
+    generating response: 
+        version按机制填写，但是response to request，version必须一致。
+        每个报文最多25个entry，超过可以再创建一个报文。
+        根据response的类型区分填入route表中的哪些项。
+ 
+-------------------------------------------RIPv2 RFC2453--------------------------------------------
+ ****Packet Format：区别于v1，主要是RIP Entry发生了变化，增加了subnet mask和Next Hop
+     0                   1                   2                   3 3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   | Address Family Identifier (2) |        Route Tag (2)          |
+   +-------------------------------+-------------------------------+
+   |                         IP Address (4)                        |
+   +---------------------------------------------------------------+
+   |                         Subnet Mask (4)                       |
+   +---------------------------------------------------------------+
+   |                         Next Hop (4)                          |
+   +---------------------------------------------------------------+
+   |                         Metric (4)                            |
+   +---------------------------------------------------------------+
+ 
+****更新：
+    Authentication —— 使用一个entry来认证，如果address family identifier为0xffff，那么就是紧跟的就
+                        是认证信息
+            0                   1                   2                   3 3
+            0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+           +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+           | Command (1)   | Version (1)   |            unused             |
+           +---------------+---------------+-------------------------------+
+           |             0xFFFF            |    Authentication Type (2)    |
+           +-------------------------------+-------------------------------+
+           ~                       Authentication (16)                     ~
+           +---------------------------------------------------------------+
+    Route tag     —— 用于区分RIP内的子系统？
+    Subnet mask   —— 更好地区分network number、subnet number、host number，与v1的兼容性细则参考协议
+    Next hop      —— 为0时，表示sender。next hop与sender必须是直接可达的（同一个逻辑网络）。引入因为
+                     一个网络中，并不是所有router都支持RIP。
+    Multicasting  —— 以组播代替广播，减少广播风暴。
+    Queries       —— RIPv2 router收到RIPv1 request ，回复RIPv1 response。如果配置为仅发送RIPv2，忽略
+                     RIPv1 request.
+    
+****兼容性：
+    Compatibility Switch —— 不按协议实现的RIPv1；RIPv1接收不到使用组播的RIPv2消息。该开关应该是基于
+                            interface的，多种状态，具体参考协议
+    Authentication       —— 开启时，接收RIPv1和经过验证的RIPv2；关闭时，带有验证信息的RIPv2信息被抛弃
+                            如果使用了authentication，RIPv1忽略。
+    Larger Infinity      —— 不变，因为会引起兼容性问题
+    Addressless Links    —— 不支持    
+   
+-------------------------------------------RIPng RFC2080--------------------------------------------
+****Limitation
+   - The protocol is limited to networks whose longest path (the
+   network’s diameter) is 15 hops
+   - The protocol depends upon "counting to infinity" to resolve certain 
+        unusual situations (see section 2.2 in [1]).大型网络中开销不小，好在现在的网络速度都较快
+   - This protocol uses fixed "metrics" to compare alternative routes.
+   It is not appropriate for situations where routes need to be chosen
+   based on real-time parameters such a measured delay, reliability,
+   or load. 以跳数作为距离来衡量，对于那些需要延迟、稳定性、速率等来route的情况不太合适。
+****imformation
+    实现要求管理员能设置该Network的metric
+   - The IPv6 prefix of the destination.
+   - A metric, which represents the total cost of getting a datagram
+   from the router to that destination.  This metric is the sum of the
+   costs associated with the networks that would be traversed to get
+   to the destination.
+   - The IPv6 address of the next router along the path to the
+   destination (i.e., the next hop).  If the destination is on one of
+   the directly-connected networks, this item is not needed.
+   - A flag to indicate that information about the route has changed 
+   recently.  This will be referred to as the "route change flag."
+   - Various timers associated with the route.  See section 2.3 for more
+   details on timers.
+****Message Format 
+   The RIPng packet format is:
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |  command (1)  |  version (1)  |       must be zero (2)        |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                                                               |
+      ~                Route Table Entry 1 (20)                       ~
+      |                                                               |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                                                               |
+      ~                         ...                                   ~
+      |                                                               |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                                                               |
+      ~                Route Table Entry N (20)                       ~
+      |                                                               |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   where each Route Table Entry (RTE) has the following format:
+
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                                                               |
+      ~                        IPv6 prefix (16)                       ~
+      |                                                               |
+      +---------------------------------------------------------------+
+      |         route tag (2)         | prefix len (1)|  metric (1)   |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    Next Hop entry，每一个Next Hop Entry针对紧跟的Entries直到下一个Next Hop Entry或者Message结束，
+    全零表示为sender。Next Hop地址必须是本地链路地址，fe80::。Next Hop不是本地链路地址，则将sender作
+    为Next Hop
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                                                               |
+   ~                    IPv6 next hop address (16)                 ~
+   |                                                               |
+   +---------------------------------------------------------------+
+   |        must be zero (2)       |must be zero(1)|     0xFF      |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   
+   默认路由：any prefix with 0 prefix length, 推荐使用::/64来标识默认路由。
+   timer: 30 +/- 0 ~ 0.5 * 30
+   
+   控制：
+   （1）限制接收updates/发送updates的主机；
+   （2）response消息中是否填入一些networks的路由信息
+   A number of sites limit the set of networks that they allow in Response messages.
+   
+   总结一下，就是下面两个，比上面两个全一些
+   （3）管理员可以配置哪些是邻居
+   - A neighbor list which allows the network administrator to be able
+   to define a list of neighbors for each router.
+   （4）管理员可以配置只处理哪些networks，response or updates
+   - A filter for specific destinations would permit the network admin
+   istrator to be able to specify a list of destination prefixes to
+   allow or disallow.
+     
+****Port   
+    UDP 521  ---- RIPng Port
