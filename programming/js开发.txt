@@ -1,0 +1,177 @@
+注意事项
+（1）js代码调试非常方便，对于不太清楚的表达式，应尽可能先测试；
+（2）比较运算符“==”和“===”，后者是"严格比较"；
+（3）移位运算符“>>"和">>>"，后者是无符号右移；
+（4）js是可以忽略语句末尾的“;”，忽略后，由编译器自动进行解析，注意自动解析带来的问题；
+
+闭包：
+	注意理解作用域链：作用域链是一个对象列表，每次调用js函数时，都会为之创建一个新的对象来保存局部变量，把这个对象添加到作用域链中。
+					当函数返回时，就从作用域中将这个绑定对象删除（但真正的删除会到其引用为0后才完成）。
+	函数定义时产生的作用域链，在函数调用时依然有效。
+	
+函数的length属性：传入函数的实参数量
+prototype属性：函数原型对象的引用
+call()方法/apply()方法：调用某个对象的方法（f.call(o)，调用o对象的f方法，可以传入其他参数。）apply方法需要将其他参数放入1个数组中（f.apply(0,[1,2])）。
+bind()方法：将函数绑定至某个对象，比如function f(y) {return this.x + y;}; var o={x:1}; var g = f.bind(o); g(2); 最后g(2)返回3.
+function构造函数：var f = new Function("x", "y", "return x*y;");
+				几乎等价于var f = funcion(x, y) {return x*y;};
+				注意：（1）可以动态创建；（2）每次调用均会解析函数体，并创建新的函数对象；而第二种则不会；（3）其创建的函数并不是词法作用域，所以词法作用域链并不生效；
+				
+关于js类，没有必要现在去研究。
+
+---------------------------------------------------------主要关注客户端js------------------------------------------------------
+在HTML中嵌入JavaScript的4种方法：
+（1）内联，<script>和</script>之间；
+（2）放在<script>标签的src属性中；
+（3）【少】放在HMTL的事件处理程序中，该事件的处理程序由onclick或者onmouseover这样的HTML属性值指定；
+（4）【少】放在一个URL里，这个URL是用特殊的“javascript:"协议；
+
+【javaScript】程序执行的时间线【理论上，并非所有浏览器行为都是如此的】
+1. 创建Document对象，解析web页面，解析HTML，添加Element对象和Text节点到文档中， document.readystate = loading；
+2. 当解析器没有遇到async和defer属性的script元素时，就会执行脚本，并且解析器暂停。so that document.write就可以动态加入脚本；
+3. 遇到aysnc属性的script元素时，开始下载脚本，并解析文档；
+4. 文档完成解析，document.readystate = interactive;
+5. 属性为defer的脚本，会按文档里出现的顺序执行，禁止使用document.write方法；
+6. 浏览器触发DOMContentLoaded事件，即程序执行从同步脚本执行阶段转化到了异步事件驱动阶段；
+7. 文档完全解析完成，浏览器还在等待其他内容载入，如图片，当所有内容载入时，document.readystate=complete；
+8. from now on, 异步响应开始；
+
+【安全性】同源策略
+脚本只能读取和所属文档来源相同的窗口和文档的属性。
+
+文档的来源包含：协议、主机、载入文档的URL端口。
+
+不严格的同源策略：
+（1）默认情况下，属性domain存放载入文档服务器的主机名，如果设为相同，则OK；
+（2）跨域资源共享（Cross-Origin Resource Sharing）；
+（3）跨文档消息（cross-document messaging）；
+
+【windows对象】
+1.计时器：setTimeout、setInterval
+	第一个参数可以作为字符串传入，超时时对字符串求值。如果超时时间设为0，则处理等待状态的事件全部执行完成后，立即调用它。
+	
+2. 浏览器定位和导航
+	window对象的location属性引用的是Location对象：当前显示文档的URL。Location的href属性是URL完整文本。location.toString() == location.herf；
+	载入新文档：assign()/replace()，后者会把之前的文档删除。reload方法，可以让浏览器重新载入当前文档。传统方法是：让location=新的URL；
+
+3. 浏览器和屏幕信息
+Navigator对象{appName，appVersion, userAgent, platform}、screen对象
+
+4. 对话框
+alert、confirm、prompt，后两者一定会阻塞，第一个有可能阻塞。
+使用一个更加复杂的方法弹出对话框：showMedalDialog()
+
+5. 错误处理
+onerror处理未捕获的异常传播到调用栈时，就处理它。并显示在console中。
+
+6. 文档元素
+HTML文档使用id属性来为元素命名，如果window对象没有此名字的属性，window对象就会赋予一个属性，其名字就是id属性的值，其值指向文档元素的HTMLElement对象。
+
+故脚本可以通过id来访问HTML文档元素。
+
+【如果window对象已经存在具有此名字的属性，这就不会发生】
+
+7. 窗体之间的关系
+window对象open()方法返回一个代表新窗口的window对象，新的窗口具有opener属性，可以打开原始窗口。两个窗口都可以相互引用。
+
+【从技术上讲，我们提到的window对象只是全局对象的一个代理】
+
+------------------------------------------------------DOM（Document Object Model）------------------------------------------------
+         ---Document---HTMLDocument
+		|
+		|                   |----Text
+		 ---CharacterData---|
+		|                   |----Comment
+		|
+		|---Element--------------HTMLElement---HTMLHeadElement/HTMLBodyElement/HTMLTitleElement/HTMLParagraphElement/HTMLInputElement/HTMLTableElement
+node--- |
+        |---Attr
+
+		Document和Element与HTMLDocument和HTMLElement的区别是：前两者代表一个HTML或者XML文档及其中的元素，后两者仅限于HTML文档。
+		
+1. 选取文档元素
+  |----id：document.getElementById()
+  |----name: document.getElementsByName()。另，因为某些元素，设定name属性值后，会在document对象创建以此name属性值为名字的属性，所以可以直接调用document.xxxxx来获取元素
+  |----标签名: document.getElementsByTagName;
+  |----CSS类: document.getElementsByClassName；标识符顺序无关，大小写（区分怪异模式或者标准模式）；
+  |----CSS选择器：
+               |
+			   |----#nav: id="nav"的元素
+			   |----div ：所有div元素
+			   |----.warning: 所有在class属性值中包含了"warning"的元素
+			   p[lang="fr"]所有使用法语的段落，如<p lang="fr">
+			   *[name="x"]所有包含name="x"属性的元素
+			   
+			   基本选择器可以组合。
+
+2. node的重要属性
+ |-- parentNode
+ |
+ |-- childNodes
+ |
+ |-- firstChild/lastChild
+ |
+ |-- nextSlibling/previoursSibling兄弟节点
+ |
+ |-- nodeType 节点类型：Document/Element/Text/Comment/DocumentFragment
+ |
+ |-- nodeValue Text/Comment节点的内容
+ |
+ |-- nodeName 元素的标签名，大写
+ 
+3. 属性
+HTML元素：标签、一组属性（名值对）。
+HTML的属性名不区分大小写，javaScript属性名则大小写敏感。
+API：getAttribute()/setAttribute()/hasAtrribute()/removeAttribute()
+dataset属性：HTML5支持在元素中设定类似”data-xxxx“的属性，实际上是元素的dataset属性的xxxx属性值，xxxx符合驼峰命名法。
+
+4. 作为HTML的元素内容
+innerHTML: 插入新的HTML
+OuterHTML：查询返回包含标签的HTML字符串；设置则使当前的HTML内容被替换；
+IE具备另一个特性：insertAdjacentHTML()方法，第一个参数是包含beforebegin/afterbegin/beforeend/afterend等字符串
+
+    | <div id="target"> | This is the element content | </div>   |
+beforebegin         afterbegin                    beforeend   afterend
+
+5. 作为纯文本的元素内容
+
+6. 创建、插入、删除节点
+创建：document.createTextNode/cloneNode()/importNode
+插入：appendChild()/insertBefore()
+删除；removeChild()
+替换：replaceChild()
+
+7. HTML表单
+表单元素的触发事件：onSubmit()/onReset()/onClick()/onChange()/onFocus()/onBlur()；
+在处理函数中,this是指触发事件的元素；
+
+---------------------------------------------CSS基础-----------------------------------------------------------
+CSS不支持"//"注释；
+引入HTML文档的方法：在<head>标签中，利用<style>和</style>标签把一个CSS样式表包起来。
+					如果是一个文件，如：
+					<head>
+						<title>Test Document</title>
+						<link rel="stylesheet" href="mystyles.css" type="text/css">
+					</head>
+	
+【层叠】web浏览器 -> 文档的样式表 -> 每个独立的HTML元素的style属性
+【类定义】
+	.radius10 {
+	border-radius: 10px;
+	-moz-border-radius: 10px;
+	-webkit-border-radius: 10px;
+	}
+【CSS重要的属性】
+position {top/left, bottom/right, width/height, z-index}
+display {visibility, clip 定义元素的”裁减区域“, overflow 指定元素比分配的空间要大时的处理方式, margin/border/padding, background, opacity 指定元素的不透明度} 
+定位元素属性position可能值：static（默认，文档内容流，不能使用top/left/其他属性定位）、absolute（相对于包含它的元素进行定位，非文档流）、fixed（相对于浏览器窗口定位，非文档流）、relative（元素按照常规的文档流进行布局）。
+absolute: 相对于position属性设置为除static值外的祖先元素；
+fixed: 
+relative: 相对于常规文档流中的一个容器定位；
+
+如果同时指定left、right、width，那么width属性将覆盖right属性，hight属性优先于bottom属性；
+【Z-index】只对于兄弟元素的堆叠，非定位元素（position: static）总是为了防止重叠的方式进行布局，因此z-index属性不会应用到它们上面。尽管如此，它们默认的z-index为0.
+【边框】border: 注意盒模型，left和top是指容器边框内侧到定位元素边框外侧的距离
+【可见性】display和visibility，区别在于如果是文档流的一部分前者不占位。对于非文档流，fixed/absolute位置，那么无区别，通常使用visibility属性。
+【脚本化内联样式】
+
